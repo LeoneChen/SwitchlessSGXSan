@@ -1,0 +1,13 @@
+*.o
+*_t.*
+*_u.*
+app
+*.so
+*.bc
+*.txt
+*.json
+vtune
+crashes
+seeds
+*.profraw
+*.profdata
