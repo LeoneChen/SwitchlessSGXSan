@@ -1,0 +1,143 @@
+diff --git a/App/App.cpp b/App/App.cpp
+index e86b49b..21b6a26 100644
+--- a/App/App.cpp
++++ b/App/App.cpp
+@@ -47,13 +47,15 @@
+ /* Global EID shared by multiple threads */
+ sgx_enclave_id_t global_eid = 0;
+ 
++timeval TotalCreateTime, TotalDestroyTime, TotalECallTime,
++    TotalECallSwitchlessTime, TotalOCallTime, TotalOCallSwitchlessTime;
+ typedef struct _sgx_errlist_t {
+     sgx_status_t err;
+     const char *msg;
+     const char *sug; /* Suggestion */
+ } sgx_errlist_t;
+ 
+-#define REPEATS 500000
++#define REPEATS 5000
+ 
+ /* Error code returned by sgx_create_enclave */
+ static sgx_errlist_t sgx_errlist[] = {
+@@ -167,7 +169,15 @@ int initialize_enclave(const sgx_uswitchless_config_t* us_config)
+ 
+     enclave_ex_p[SGX_CREATE_ENCLAVE_EX_SWITCHLESS_BIT_IDX] = (const void*)us_config;
+ 
++    struct timeval tval_before, tval_after, tval_result;
++    gettimeofday(&tval_before, NULL);
++
+     ret = sgx_create_enclave_ex(ENCLAVE_FILENAME, SGX_DEBUG_FLAG, NULL, NULL, &global_eid, NULL, SGX_CREATE_ENCLAVE_EX_SWITCHLESS, enclave_ex_p);
++
++    gettimeofday(&tval_after, NULL);
++    timersub(&tval_after, &tval_before, &tval_result);
++    timeradd(&TotalCreateTime, &tval_result, &TotalCreateTime);
++
+     if (ret != SGX_SUCCESS) {
+         print_error_message(ret);
+         return -1;
+@@ -191,8 +201,8 @@ void ocall_empty_switchless(void) {}
+ void benchmark_empty_ocall(int is_switchless) 
+ {
+     unsigned long nrepeats = REPEATS;
+-    printf("Repeating an **%s** OCall that does nothing for %lu times...\n",
+-            is_switchless ? "switchless" : "ordinary", nrepeats);
++    // printf("Repeating an **%s** OCall that does nothing for %lu times...\n",
++    //         is_switchless ? "switchless" : "ordinary", nrepeats);
+ 
+     struct timeval tval_before, tval_after, tval_result;
+     gettimeofday(&tval_before, NULL);
+@@ -206,14 +216,18 @@ void benchmark_empty_ocall(int is_switchless)
+ 
+     gettimeofday(&tval_after, NULL);
+     timersub(&tval_after, &tval_before, &tval_result);
+-    printf("Time elapsed: %ld.%06ld seconds\n", (long int)tval_result.tv_sec, (long int)tval_result.tv_usec);
++    if (is_switchless)
++        timeradd(&TotalOCallSwitchlessTime, &tval_result,
++                 &TotalOCallSwitchlessTime);
++    else
++        timeradd(&TotalOCallTime, &tval_result, &TotalOCallTime);
+ }
+ 
+ void benchmark_empty_ecall(int is_switchless) 
+ {
+     unsigned long nrepeats = REPEATS;
+-    printf("Repeating an **%s** ECall that does nothing for %lu times...\n",
+-            is_switchless ? "switchless" : "ordinary", nrepeats);
++    // printf("Repeating an **%s** ECall that does nothing for %lu times...\n",
++    //         is_switchless ? "switchless" : "ordinary", nrepeats);
+ 
+     struct timeval tval_before, tval_after, tval_result;
+     gettimeofday(&tval_before, NULL);
+@@ -225,15 +239,26 @@ void benchmark_empty_ecall(int is_switchless)
+ 
+     gettimeofday(&tval_after, NULL);
+     timersub(&tval_after, &tval_before, &tval_result);
+-    printf("Time elapsed: %ld.%06ld seconds\n", (long int)tval_result.tv_sec, (long int)tval_result.tv_usec);
++    if (is_switchless)
++        timeradd(&TotalECallSwitchlessTime, &tval_result,
++                 &TotalECallSwitchlessTime);
++    else
++        timeradd(&TotalECallTime, &tval_result, &TotalECallTime);
+ }
+ 
+ /* Application entry */
+ int SGX_CDECL main(int argc, char *argv[])
+ {
++    timerclear(&TotalCreateTime);
++    timerclear(&TotalDestroyTime);
++    timerclear(&TotalECallTime);
++    timerclear(&TotalECallSwitchlessTime);
++    timerclear(&TotalOCallTime);
++    timerclear(&TotalOCallSwitchlessTime);
+     (void) argc;
+     (void) argv;
+ 
++    for (size_t i = 0; i < 1000; i++) {
+     /* Configuration for Switchless SGX */
+     sgx_uswitchless_config_t us_config = SGX_USWITCHLESS_CONFIG_INITIALIZER;
+     us_config.num_uworkers = 2;
+@@ -247,17 +272,40 @@ int SGX_CDECL main(int argc, char *argv[])
+     }
+ 
+     
+-    printf("Running a benchmark that compares **ordinary** and **switchless** OCalls...\n");
++    // printf("Running a benchmark that compares **ordinary** and **switchless** OCalls...\n");
+     benchmark_empty_ocall(1);
+     benchmark_empty_ocall(0);
+-    printf("Done.\n");
++    // printf("Done.\n");
+     
+ 
+-    printf("Running a benchmark that compares **ordinary** and **switchless** ECalls...\n");
++    // printf("Running a benchmark that compares **ordinary** and **switchless** ECalls...\n");
+     benchmark_empty_ecall(1);
+     benchmark_empty_ecall(0);
+-    printf("Done.\n");
++    // printf("Done.\n");
++
++    struct timeval tval_before, tval_after, tval_result;
++    gettimeofday(&tval_before, NULL);
+ 
+     sgx_destroy_enclave(global_eid);
++
++    gettimeofday(&tval_after, NULL);
++    timersub(&tval_after, &tval_before, &tval_result);
++    timeradd(&TotalDestroyTime, &tval_result, &TotalDestroyTime);
++    }
++    printf("Time elapsed(sgx_create_enclave_ex): %ld.%06ld seconds\n",
++           (long int)TotalCreateTime.tv_sec, (long int)TotalCreateTime.tv_usec);
++    printf("Time elapsed(sgx_destroy_enclave): %ld.%06ld seconds\n",
++           (long int)TotalDestroyTime.tv_sec,
++           (long int)TotalDestroyTime.tv_usec);
++    printf("Time elapsed(sgx_ecall): %ld.%06ld seconds\n",
++           (long int)TotalECallTime.tv_sec, (long int)TotalECallTime.tv_usec);
++    printf("Time elapsed(sgx_ecall_switchless): %ld.%06ld seconds\n",
++           (long int)TotalECallSwitchlessTime.tv_sec,
++           (long int)TotalECallSwitchlessTime.tv_usec);
++    printf("Time elapsed(sgx_ocall): %ld.%06ld seconds\n",
++           (long int)TotalOCallTime.tv_sec, (long int)TotalOCallTime.tv_usec);
++    printf("Time elapsed(sgx_ocall_switchless): %ld.%06ld seconds\n",
++           (long int)TotalOCallSwitchlessTime.tv_sec,
++           (long int)TotalOCallSwitchlessTime.tv_usec);
+     return 0;
+ }

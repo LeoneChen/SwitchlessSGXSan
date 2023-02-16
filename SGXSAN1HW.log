@@ -1,0 +1,6 @@
+Time elapsed(sgx_create_enclave_ex): 28.273045 seconds
+Time elapsed(sgx_destroy_enclave): 1.375212 seconds
+Time elapsed(sgx_ecall): 34.300797 seconds
+Time elapsed(sgx_ecall_switchless): 1.411731 seconds
+Time elapsed(sgx_ocall): 11.400851 seconds
+Time elapsed(sgx_ocall_switchless): 4.627780 seconds
