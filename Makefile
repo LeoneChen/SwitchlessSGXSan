@@ -31,10 +31,16 @@
 
 ######## SGX SDK Settings ########
 
-SGX_SDK ?= /opt/intel/sgxsdk
-SGX_MODE ?= HW
+SGX_SDK ?= $(abspath ../../install)
+SGX_MODE ?= SIM
 SGX_ARCH ?= x64
 SGX_DEBUG ?= 1
+
+# I use llvm pass to instrument enclave src
+CXX := clang++-13
+CC := clang-13
+LD := lld
+OBJCOPY := objcopy
 
 ifeq ($(shell getconf LONG_BIT), 32)
 	SGX_ARCH := x86
@@ -101,8 +107,13 @@ endif
 App_Cpp_Flags := $(App_C_Flags) $(SGX_COMMON_CXXFLAGS)
 App_C_Flags += $(SGX_COMMON_CFLAGS)
 App_Link_Flags := -L$(SGX_LIBRARY_PATH) \
-                  -Wl,--whole-archive  -lsgx_uswitchless -Wl,--no-whole-archive \
-                  -l$(Urts_Library_Name) -lpthread
+                  -l$(Urts_Library_Name) -lpthread \
+	-ldl \
+	-Wl,-rpath=$(SGX_LIBRARY_PATH) \
+	-Wl,-whole-archive -lSGXSanRTApp -Wl,-no-whole-archive \
+	-lcrypto \
+	-lboost_program_options \
+	-rdynamic
 
 ifneq ($(SGX_MODE), HW)
 	App_Link_Flags += -lsgx_uae_service_sim
@@ -128,8 +139,11 @@ Crypto_Library_Name := sgx_tcrypto
 Enclave_Cpp_Files := Enclave/Enclave.cpp
 Enclave_Include_Paths := -IEnclave -I$(SGX_SDK)/include -I$(SGX_SDK)/include/tlibc -I$(SGX_SDK)/include/libcxx
 
-Enclave_C_Flags := -nostdinc -fvisibility=hidden -fpie -fstack-protector $(Enclave_Include_Paths)
-Enclave_Cpp_Flags := $(Enclave_C_Flags) $(SGX_COMMON_CXXFLAGS) -nostdinc++
+Enclave_C_Flags := -fvisibility=hidden -fpie -fstack-protector $(Enclave_Include_Paths) \
+	-fno-discard-value-names \
+	-flegacy-pass-manager \
+	-Xclang -load -Xclang $(SGX_SDK)/lib64/libSGXSanPass.so
+Enclave_Cpp_Flags := $(Enclave_C_Flags) $(SGX_COMMON_CXXFLAGS)
 Enclave_C_Flags += $(SGX_COMMON_CFLAGS)
 
 # Enable the security flags
@@ -150,13 +164,13 @@ Enclave_Security_Link_Flags := -Wl,-z,relro,-z,now,-z,noexecstack
 #  -Wl,--no-whole-archive with -l$(TRTS_LIBRARY) and before the linker options 
 #  for other libraries (e.g., -lsgx_tstdc).
 Enclave_Link_Flags := $(Enclave_Security_Link_Flags) \
-    -Wl,--no-undefined -nostdlib -nodefaultlibs -nostartfiles -L$(SGX_LIBRARY_PATH) \
-	-Wl,--whole-archive  -lsgx_tswitchless -l$(Trts_Library_Name) -Wl,--no-whole-archive \
-	-Wl,--start-group -lsgx_tstdc -lsgx_tcxx -l$(Crypto_Library_Name) -l$(Service_Library_Name) -Wl,--end-group \
-	-Wl,-Bstatic -Wl,-Bsymbolic -Wl,--no-undefined \
-	-Wl,-pie,-eenclave_entry -Wl,--export-dynamic  \
+    -L$(SGX_LIBRARY_PATH) \
+	-Wl,--whole-archive -lSGXSanRTEnclave -l$(Trts_Library_Name) -Wl,--no-whole-archive \
+	-Wl,--start-group -l$(Crypto_Library_Name) -l$(Service_Library_Name) -Wl,--end-group \
+	-Wl,-Bsymbolic \
+	-Wl,-eenclave_entry -Wl,--export-dynamic  \
 	-Wl,--defsym,__ImageBase=0 \
-	-Wl,--version-script=Enclave/Enclave.lds
+	--shared
 
 Enclave_Cpp_Objects := $(Enclave_Cpp_Files:.cpp=.o)
 
@@ -235,7 +249,8 @@ $(Enclave_Name): Enclave/Enclave_t.o $(Enclave_Cpp_Objects)
 	@echo "LINK =>  $@"
 
 $(Signed_Enclave_Name): $(Enclave_Name)
-	@$(SGX_ENCLAVE_SIGNER) sign -key Enclave/Enclave_private_test.pem -enclave $(Enclave_Name) -out $@ -config $(Enclave_Config_File)
+#	@$(SGX_ENCLAVE_SIGNER) sign -key Enclave/Enclave_private_test.pem -enclave $(Enclave_Name) -out $@ -config $(Enclave_Config_File)
+	@ln -sf $< $@
 	@echo "SIGN =>  $@"
 
 .PHONY: clean
